@@ -2,3 +2,4 @@ SpeechRecognition
 boto3
 pyttsx3
 playsound
+customtkinter
