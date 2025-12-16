@@ -1,256 +1,185 @@
-import boto3
-import speech_recognition as sr
-from playsound import playsound
-import datetime
-import threading
 import os
-import time
+import uuid
+import json
+import datetime
 
-import customtkinter as ctk
-from tkinter import END
+import boto3
+from flask import Flask, render_template, request, jsonify, url_for
+from openai import OpenAI
 
-# ========== AWS + Speech Setup ==========
 
-polly = boto3.client('polly')
-recognizer = sr.Recognizer()
+# ============================================
+# AWS Secrets Manager — Load API Key
+# ============================================
 
-def speak_with_polly(text):
-    """Send text to Polly, save to mp3, and play it."""
-    print(f"Malik says: {text}")
+def get_openai_key_from_secrets(secret_name: str) -> str:
+    client = boto3.client("secretsmanager")
+
+    response = client.get_secret_value(SecretId=secret_name)
+
+    if "SecretString" in response:
+        secret_data = json.loads(response["SecretString"])
+        return secret_data.get("API_KEY")
+
+    raise Exception("Failed to read API_KEY from Secrets Manager")
+
+
+OPENAI_SECRET_NAME = "open_api_key"  # <--- your AWS secret name
+OPENAI_API_KEY = get_openai_key_from_secrets(OPENAI_SECRET_NAME)
+
+client = OpenAI(api_key=OPENAI_API_KEY)
+
+
+# ============================================
+# Flask, Polly, etc.
+# ============================================
+
+app = Flask(__name__)
+
+AUDIO_DIR = os.path.join(app.static_folder or "static", "audio")
+os.makedirs(AUDIO_DIR, exist_ok=True)
+
+polly = boto3.client("polly")
+
+
+# ============================================
+#  OpenAI brain
+# ============================================
+
+def ask_openai(prompt: str) -> str:
+    """
+    Send the user's text to OpenAI and return Malik's reply.
+    Uses the new OpenAI client API.
+    """
+    if not OPENAI_API_KEY or OPENAI_API_KEY == "YOUR_OPENAI_API_KEY_HERE":
+        return "My OpenAI brain isn't configured yet. Please add a valid API key."
+
     try:
-        response = polly.synthesize_speech(
-            Text=text,
-            OutputFormat='mp3',
-            VoiceId='Matthew'  # Change voice here if you want
+        completion = client.chat.completions.create(
+            model="gpt-4o-mini",  # choose any model you like
+            messages=[
+                {
+                    "role": "system",
+                    "content": (
+                        "You are Malik, a friendly, confident AI assistant. "
+                        "Answer clearly and concisely. Break down technical topics "
+                        "in simple terms when needed."
+                    ),
+                },
+                {"role": "user", "content": prompt},
+            ],
+            temperature=0.7,
         )
-        out_file = "response.mp3"
-        with open(out_file, 'wb') as file:
-            file.write(response['AudioStream'].read())
-        playsound(out_file)
-        # Optional: clean up file
-        try:
-            os.remove(out_file)
-        except OSError:
-            pass
+
+        return completion.choices[0].message.content.strip()
+
     except Exception as e:
-        print(f"Polly error: {e}")
+        print(f"[OpenAI] Error: {e}")
+        return "My OpenAI brain had trouble thinking. Try again in a moment."
 
-def listen_command():
-    """Listen once for a command from the mic and return recognized text."""
-    with sr.Microphone() as source:
-        try:
-            recognizer.adjust_for_ambient_noise(source, duration=0.5)
-        except Exception:
-            pass
 
-        print("🎧 Malik is listening for your command...")
-        audio = recognizer.listen(source)
-
-        try:
-            command = recognizer.recognize_google(audio)
-            print(f"🗣️ You said: {command}")
-            return command.lower()
-        except sr.UnknownValueError:
-            return "Sorry, I didn't catch that."
-        except sr.RequestError:
-            return "Speech recognition service is down."
+# ============================================
+#  Malik's command routing
+# ============================================
 
 def respond_to_command(command: str) -> str:
-    """Your existing basic logic for Malik's brain."""
-    command = command.lower()
+    """
+    Handle some commands locally (name, time, joke, exit),
+    and delegate all other questions to OpenAI.
+    """
+    text = (command or "").strip()
+    lc = text.lower()
 
-    if "your name" in command:
+    if "your name" in lc or "who are you" in lc:
         return "I am Malik, your intelligent assistant."
-    elif "time" in command:
+    elif "time" in lc:
         return f"The current time is {datetime.datetime.now().strftime('%I:%M %p')}."
-    elif "joke" in command:
+    elif "joke" in lc:
         return "Why did the AI go broke? Because it had too many neural debts!"
-    elif "exit" in command or "quit" in command or "shut down" in command:
-        return "Shutting down. Goodbye!"
-    else:
-        return "I'm still learning. Please try asking something else."
+    elif any(word in lc for word in ["exit", "quit", "shut down", "shutdown"]):
+        return "Shutting down. Goodbye."
+    elif not text:
+        return "Say something so I can help you."
 
-# ========== UI App ==========
+    # Everything else → OpenAI
+    return ask_openai(text)
 
-class MalikApp(ctk.CTk):
 
-    def __init__(self):
-        super().__init__()
+# ============================================
+#  Amazon Polly Text-to-Speech
+# ============================================
 
-        # ---- Window config ----
-        ctk.set_appearance_mode("dark")
-        ctk.set_default_color_theme("dark-blue")  # You can try "green" or custom themes
+def synthesize_speech_to_file(text: str) -> str:
+    """
+    Use Amazon Polly to synthesize Malik's reply to an MP3 file.
+    Returns the filename (not the full path).
+    """
+    response = polly.synthesize_speech(
+        Text=text,
+        OutputFormat="mp3",
+        VoiceId="Matthew",  # change to another Polly voice if you want
+    )
 
-        self.title("MΛLIK • Voice AI")
-        self.geometry("900x600")
-        self.minsize(800, 500)
+    filename = f"{uuid.uuid4().hex}.mp3"
+    filepath = os.path.join(AUDIO_DIR, filename)
 
-        # Grid layout (2 rows: header, main; 1 column)
-        self.grid_rowconfigure(0, weight=0)
-        self.grid_rowconfigure(1, weight=1)
-        self.grid_columnconfigure(0, weight=1)
+    with open(filepath, "wb") as f:
+        f.write(response["AudioStream"].read())
 
-        # ---- Header frame ----
-        self.header_frame = ctk.CTkFrame(self, corner_radius=20)
-        self.header_frame.grid(row=0, column=0, sticky="nsew", padx=16, pady=(16, 8))
+    return filename
 
-        self.header_frame.grid_columnconfigure(0, weight=1)
-        self.header_frame.grid_columnconfigure(1, weight=0)
 
-        self.title_label = ctk.CTkLabel(
-            self.header_frame,
-            text="MΛLIK",
-            font=ctk.CTkFont(size=28, weight="bold")
-        )
-        self.title_label.grid(row=0, column=0, sticky="w", padx=16, pady=12)
+# ============================================
+#  Routes
+# ============================================
 
-        self.status_label = ctk.CTkLabel(
-            self.header_frame,
-            text="Standby 💤",
-            font=ctk.CTkFont(size=14, weight="normal")
-        )
-        self.status_label.grid(row=0, column=1, sticky="e", padx=16, pady=12)
+@app.route("/")
+def index():
+    """
+    Renders the Bootstrap + JS UI.
+    Make sure you have templates/index.html present.
+    """
+    return render_template("index.html")
 
-        # ---- Main body frame ----
-        self.body_frame = ctk.CTkFrame(self, corner_radius=20)
-        self.body_frame.grid(row=1, column=0, sticky="nsew", padx=16, pady=(0, 16))
 
-        self.body_frame.grid_rowconfigure(0, weight=1)
-        self.body_frame.grid_rowconfigure(1, weight=0)
-        self.body_frame.grid_columnconfigure(0, weight=1)
+@app.route("/api/chat", methods=["POST"])
+def chat():
+    """
+    Frontend sends JSON: { "message": "..." }
+    We:
+      - Run respond_to_command (local logic + OpenAI)
+      - Generate an MP3 via Polly
+      - Return JSON with text reply + audio URL
+    """
+    data = request.get_json(force=True)
+    user_message = data.get("message", "")
 
-        # Chat display
-        self.chat_box = ctk.CTkTextbox(
-            self.body_frame,
-            wrap="word",
-            state="disabled",
-            corner_radius=16,
-            font=ctk.CTkFont(size=14),
-            activate_scrollbars=True
-        )
-        self.chat_box.grid(row=0, column=0, sticky="nsew", padx=16, pady=16)
+    # Malik thinks
+    reply = respond_to_command(user_message)
 
-        # Input frame
-        self.input_frame = ctk.CTkFrame(self.body_frame, corner_radius=16)
-        self.input_frame.grid(row=1, column=0, sticky="ew", padx=16, pady=(0, 16))
+    # Malik speaks
+    audio_url = None
+    try:
+        audio_filename = synthesize_speech_to_file(reply)
+        audio_url = url_for("static", filename=f"audio/{audio_filename}")
+    except Exception as e:
+        print(f"[Polly] Error: {e}")
+        # audio_url stays None; frontend will still have text
 
-        self.input_frame.grid_columnconfigure(0, weight=1)
-        self.input_frame.grid_columnconfigure(1, weight=0)
-        self.input_frame.grid_columnconfigure(2, weight=0)
+    return jsonify(
+        {
+            "reply": reply,
+            "audio_url": audio_url,
+        }
+    )
 
-        # Text entry
-        self.entry = ctk.CTkEntry(
-            self.input_frame,
-            placeholder_text="Type a message or press 🎤 to talk...",
-            font=ctk.CTkFont(size=14)
-        )
-        self.entry.grid(row=0, column=0, sticky="ew", padx=(12, 8), pady=10)
-        self.entry.bind("<Return>", self.on_enter_pressed)
 
-        # Mic button
-        self.mic_button = ctk.CTkButton(
-            self.input_frame,
-            text="🎤",
-            width=50,
-            command=self.on_mic_pressed
-        )
-        self.mic_button.grid(row=0, column=1, padx=(0, 8), pady=10)
-
-        # Send button
-        self.send_button = ctk.CTkButton(
-            self.input_frame,
-            text="Send",
-            command=self.on_send_pressed
-        )
-        self.send_button.grid(row=0, column=2, padx=(0, 12), pady=10)
-
-        # Welcome message
-        self._append_message("Malik", "What’s good? I’m online and ready to help. 👋")
-
-    # ---- Chat helpers ----
-
-    def _append_message(self, speaker: str, text: str):
-        """Append a nicely formatted message to the chat box."""
-        self.chat_box.configure(state="normal")
-
-        if speaker.lower() == "you":
-            tag = "user"
-            prefix = "🧍‍♂️ You: "
-        else:
-            tag = "malik"
-            prefix = "🤖 Malik: "
-
-        # Create tag styles once
-        if not "user" in self.chat_box.tag_names():
-            self.chat_box.tag_config("user", foreground="#91E6FF")
-        if not "malik" in self.chat_box.tag_names():
-            self.chat_box.tag_config("malik", foreground="#A3FF9B")
-
-        self.chat_box.insert(END, prefix, tag)
-        self.chat_box.insert(END, text + "\n\n")
-        self.chat_box.yview_moveto(1.0)  # scroll to bottom
-
-        self.chat_box.configure(state="disabled")
-
-    def _set_status(self, text: str):
-        self.status_label.configure(text=text)
-
-    # ---- Event handlers ----
-
-    def on_enter_pressed(self, event):
-        self.on_send_pressed()
-
-    def on_send_pressed(self):
-        user_text = self.entry.get().strip()
-        if not user_text:
-            return
-
-        self.entry.delete(0, END)
-        self._append_message("You", user_text)
-
-        # Handle in background so UI doesn't freeze
-        threading.Thread(target=self._handle_command, args=(user_text,), daemon=True).start()
-
-    def on_mic_pressed(self):
-        """Trigger listening via microphone."""
-        self._set_status("Listening 🎧…")
-        self._append_message("Malik", "I’m listening… go ahead. 🎙️")
-
-        threading.Thread(target=self._mic_listen_and_handle, daemon=True).start()
-
-    def _mic_listen_and_handle(self):
-        command = listen_command()
-        self._set_status("Processing 🧠…")
-
-        # Show what the user said
-        self._append_message("You", command)
-
-        # Then process it
-        self._handle_command(command)
-
-    def _handle_command(self, text: str):
-        self._set_status("Thinking 🧠…")
-
-        response = respond_to_command(text)
-
-        # Speak and display response
-        try:
-            speak_with_polly(response)
-        except Exception as e:
-            print(f"Speak error: {e}")
-
-        self._append_message("Malik", response)
-
-        if "shutting down" in response.lower():
-            self._set_status("Offline ❌")
-            # Give a short delay so the last speech can finish
-            time.sleep(1.5)
-            self.quit()
-        else:
-            self._set_status("Standby 💤")
-
+# ============================================
+#  Main entrypoint
+# ============================================
 
 if __name__ == "__main__":
-    app = MalikApp()
-    app.mainloop()
+    # Run in dev mode – open http://127.0.0.1:5000
+    app.run(host="0.0.0.0", port=5000, debug=True)
+
 
