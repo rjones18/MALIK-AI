@@ -8,6 +8,7 @@ env:
   AWS_REGION: ${{ secrets.AWS_REGION }}
   AWS_ACCOUNT_ID: ${{ secrets.AWS_ACCOUNT_ID }}
   ECR_REPOSITORY: malik-ai
+  DOCKER_CONTEXT: ./docker_build
 
 jobs:
   docker:
@@ -43,7 +44,7 @@ jobs:
       - name: Build and push (latest + sha)
         uses: docker/build-push-action@v5
         with:
-          context: ./docker_build
+          context: ${{ env.DOCKER_CONTEXT }}
           push: true
           tags: |
             ${{ env.ECR_IMAGE }}:latest
