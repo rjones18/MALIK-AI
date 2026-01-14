@@ -44,3 +44,10 @@ tags = {
   Owner       = "Reggie"
   ManagedBy   = "Terraform"
 }
+
+# ------------------
+# DNS / HTTPS
+# ------------------
+hosted_zone_name = "reggiestestdomain.com"              # must match your Route53 Hosted Zone name (often ends with a dot)
+app_fqdn         = "malik-ai.reggiestestdomain.com"      # the full record you want
+
