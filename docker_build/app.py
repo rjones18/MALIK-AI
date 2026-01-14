@@ -24,7 +24,7 @@ def get_openai_key_from_secrets(secret_name: str) -> str:
     raise Exception("Failed to read API_KEY from Secrets Manager")
 
 
-OPENAI_SECRET_NAME = "MALIK_SECRETS"  # <--- your AWS secret name
+OPENAI_SECRET_NAME = "open_api_key"  # <--- your AWS secret name
 OPENAI_API_KEY = get_openai_key_from_secrets(OPENAI_SECRET_NAME)
 
 client = OpenAI(api_key=OPENAI_API_KEY)

@@ -33,7 +33,7 @@ ecr_image = "614768946157.dkr.ecr.us-east-1.amazonaws.com/malik-ai:latest"
 # ------------------
 # Secrets
 # ------------------
-secrets_manager_arn = "arn:aws:secretsmanager:us-east-1:614768946157:secret:MALIK_SECRETS-35Qfrv"
+secrets_manager_arn = "arn:aws:secretsmanager:us-east-1:614768946157:secret:open_api_key-p6ZH4d"
 
 # ------------------
 # Tags
