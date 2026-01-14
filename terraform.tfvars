@@ -23,7 +23,7 @@ private_subnet_ids = [
 # ECS / App settings
 # ------------------
 app_name        = "malik-ai"
-container_port = 5000
+container_port = 8080
 desired_count  = 2
 cpu             = 1024
 memory          = 2048
