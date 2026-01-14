@@ -11,9 +11,7 @@ This project demonstrates **modern DevOps, security-first infrastructure, and CI
 ▶️ **Application Walkthrough**  
 *(Click to watch the demo video)*
 
-[![Malik AI Demo](https://img.shields.io/badge/Watch-Demo-blue)](LINK_TO_VIDEO)
-
-> Replace `LINK_TO_VIDEO` with your hosted demo (MP4, YouTube, Loom, etc.)
+Malik AI Demo: https://youtu.be/2FtZxVk9Yq8
 
 ---
 
@@ -80,9 +78,3 @@ This project was built to showcase:
 - End-to-end CI/CD automation
 - Practical AI integration in a real-world cloud environment
 
----
-
-## 📎 Links
-
-- **Infrastructure Module:** https://github.com/rjones18/AWS-ECS-TERRAFORM-MODULE  
-- **Architecture Diagram:** https://github.com/rjones18/Images/blob/main/Malik-AI.png  
